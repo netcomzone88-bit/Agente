@@ -115,14 +115,16 @@ async def whatsapp_webhook(
 
     if lead_data:
         log.info(
-            "LEAD CALIFICADO — número=%s nombre=%s necesidad=%s nivel=%s",
+            "LEAD QUALIFIED — number=%s name=%s interest=%s budget=%s timeline=%s level=%s",
             sender,
-            lead_data["nombre"],
-            lead_data["necesidad"],
-            lead_data["nivel"],
+            lead_data["name"],
+            lead_data["interest"],
+            lead_data["budget"],
+            lead_data["timeline"],
+            lead_data["level"],
         )
-        # TODO: here you can save lead_data to a CRM, database, or send
-        # a Slack/email notification to your sales team.
+        # TODO: save lead_data to your CRM (e.g. HubSpot, Salesforce) or
+        # send a Slack/email notification to your Citikars sales team.
 
     return PlainTextResponse("ok")
 

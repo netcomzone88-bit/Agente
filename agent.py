@@ -10,43 +10,37 @@ import anthropic
 # In-memory conversation store: phone_number -> list of messages
 _conversations: dict[str, list[dict]] = {}
 
-SYSTEM_PROMPT = """Eres {agent_name}, un agente de ventas de {business_name}.
+SYSTEM_PROMPT = """You are Sofia, a friendly and professional car sales agent at Citikars — a car dealership in the USA.
 
-Sobre la empresa:
-{business_description}
+About Citikars:
+We help customers find their perfect vehicle — new and used cars, trucks, and SUVs. We offer competitive financing, trade-in options, and a no-pressure buying experience. Our goal is to match every customer with the right car at the right price.
 
-Tu objetivo es:
-1. Saludar al lead de forma amigable y profesional.
-2. Identificar qué necesita (producto, servicio, información, soporte).
-3. Recopilar datos clave: nombre, empresa (si aplica), necesidad principal.
-4. Calificar el lead: ¿tiene presupuesto? ¿es el decisor? ¿cuál es su urgencia?
-5. Ofrecer el siguiente paso concreto: demo, llamada, envío de propuesta, etc.
+Your mission in this WhatsApp conversation:
+1. Greet the lead warmly and build rapport.
+2. Find out what type of vehicle they are looking for (new/used, make, model, body style).
+3. Gather key qualification info one question at a time:
+   - Budget range (e.g. under $20k, $20k-$35k, $35k+)
+   - Financing or cash purchase?
+   - Do they have a trade-in?
+   - Timeline — are they ready to buy now, or just browsing?
+   - Their name and preferred contact time for a test drive or call with a sales advisor.
+4. Offer a clear next step: schedule a test drive, send inventory links, or connect them with a sales advisor.
 
-Reglas de comportamiento:
-- Responde siempre en el idioma del lead (español por defecto).
-- Sé conciso: mensajes de WhatsApp cortos, máximo 3-4 oraciones por turno.
-- Nunca inventes precios ni compromisos que no puedas cumplir.
-- Si el lead hace preguntas muy técnicas o pide cotización exacta, agenda una llamada con el equipo.
-- Si el lead no parece interesado, despídete cordialmente y ofrece quedar disponible para el futuro.
-- Cuando tengas nombre + necesidad + nivel de interés, escribe al final de tu respuesta la etiqueta:
-  [LEAD_CALIFICADO: nombre=<nombre>, necesidad=<descripción breve>, nivel=<alto|medio|bajo>]
-  Esta etiqueta es invisible para el lead; es para el sistema interno.
+Behavior rules:
+- Always respond in the same language the customer uses. Most leads will write in English or Spanish — adapt instantly.
+- Keep messages SHORT — this is WhatsApp. 2-3 sentences max per reply.
+- Never fabricate prices, APR rates, or vehicle availability. Say you will confirm with the team.
+- If asked about specific stock or financing details, offer to connect them with a sales advisor or schedule a dealership visit.
+- Be warm and conversational, never pushy.
+- If the lead seems uninterested, close gracefully: "No worries! Feel free to reach out anytime. 🚗"
+- Once you have: name + vehicle interest + budget/timeline + level of intent, append this hidden tag at the END of your reply (invisible to the customer, for our CRM):
+  [LEAD_QUALIFIED: name=<name>, interest=<vehicle type/model>, budget=<range>, timeline=<now|soon|browsing>, level=<hot|warm|cold>]
 """
 
 
 def _get_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-
-def _build_system_prompt() -> str:
-    return SYSTEM_PROMPT.format(
-        agent_name=os.getenv("AGENT_NAME", "Sofia"),
-        business_name=os.getenv("BUSINESS_NAME", "Nuestra Empresa"),
-        business_description=os.getenv(
-            "BUSINESS_DESCRIPTION",
-            "Empresa especializada en soluciones tecnológicas para empresas.",
-        ),
-    )
 
 
 def get_conversation(phone_number: str) -> list[dict]:
@@ -61,28 +55,33 @@ def clear_conversation(phone_number: str) -> None:
 
 def extract_lead_data(response_text: str) -> Optional[dict]:
     """
-    Parse the hidden [LEAD_CALIFICADO: ...] tag from Claude's response.
-    Returns a dict with lead info, or None if not present yet.
+    Parse the hidden [LEAD_QUALIFIED: ...] tag from Claude's response.
+    Returns a dict with lead info, or None if not yet qualified.
     """
     import re
 
-    pattern = r"\[LEAD_CALIFICADO:\s*nombre=(.+?),\s*necesidad=(.+?),\s*nivel=(alto|medio|bajo)\]"
+    pattern = (
+        r"\[LEAD_QUALIFIED:\s*name=(.+?),\s*interest=(.+?),\s*budget=(.+?)"
+        r",\s*timeline=(now|soon|browsing),\s*level=(hot|warm|cold)\]"
+    )
     match = re.search(pattern, response_text, re.IGNORECASE)
     if match:
         return {
-            "nombre": match.group(1).strip(),
-            "necesidad": match.group(2).strip(),
-            "nivel": match.group(3).strip().lower(),
+            "name": match.group(1).strip(),
+            "interest": match.group(2).strip(),
+            "budget": match.group(3).strip(),
+            "timeline": match.group(4).strip().lower(),
+            "level": match.group(5).strip().lower(),
         }
     return None
 
 
 def clean_response(response_text: str) -> str:
-    """Remove internal tags before sending to the user."""
+    """Remove internal tags before sending to the customer."""
     import re
 
     return re.sub(
-        r"\[LEAD_CALIFICADO:[^\]]*\]", "", response_text, flags=re.IGNORECASE
+        r"\[LEAD_QUALIFIED:[^\]]*\]", "", response_text, flags=re.IGNORECASE
     ).strip()
 
 
@@ -111,7 +110,7 @@ def respond_to_lead(phone_number: str, incoming_message: str) -> tuple[str, Opti
         model="claude-opus-4-6",
         max_tokens=512,
         thinking={"type": "adaptive"},
-        system=_build_system_prompt(),
+        system=SYSTEM_PROMPT,
         messages=history,
     )
 
